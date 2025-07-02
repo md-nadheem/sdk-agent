@@ -93,10 +93,18 @@ def get_or_create_conversation(conversation_id: Optional[str] = None) -> str:
 
 def serialize_agent(agent: Agent) -> Dict[str, Any]:
     """Serialize an agent for API response."""
+    handoff_names = []
+    if hasattr(agent, 'handoffs') and agent.handoffs:
+        for handoff_obj in agent.handoffs:
+            if hasattr(handoff_obj, 'target') and hasattr(handoff_obj.target, 'name'):
+                handoff_names.append(handoff_obj.target.name)
+            elif hasattr(handoff_obj, 'name'):
+                handoff_names.append(handoff_obj.name)
+    
     return {
         "name": agent.name,
         "description": agent.handoff_description or "No description available",
-        "handoffs": [h.target.name for h in agent.handoffs] if agent.handoffs else [],
+        "handoffs": handoff_names,
         "tools": [tool.__name__ for tool in agent.tools] if agent.tools else [],
         "input_guardrails": agent.input_guardrails or [],
     }
@@ -120,19 +128,32 @@ async def run_single_agent_turn(
             if guardrail_name in all_guardrails:
                 guardrail_func = all_guardrails[guardrail_name]
                 try:
+                    # Call the guardrail function properly
                     result = await guardrail_func(context, message)
+                    
+                    # Handle different result types
+                    if hasattr(result, 'is_relevant'):
+                        passed = result.is_relevant
+                        reasoning = result.reasoning if hasattr(result, 'reasoning') else ""
+                    elif hasattr(result, 'is_safe'):
+                        passed = result.is_safe
+                        reasoning = result.reasoning if hasattr(result, 'reasoning') else ""
+                    else:
+                        passed = bool(result)
+                        reasoning = str(result)
+                    
                     guardrail_check = {
                         "id": str(uuid.uuid4()),
                         "name": guardrail_name,
                         "input": message,
-                        "reasoning": result.reasoning if hasattr(result, 'reasoning') else "",
-                        "passed": result.is_relevant if hasattr(result, 'is_relevant') else result.is_safe,
+                        "reasoning": reasoning,
+                        "passed": passed,
                         "timestamp": datetime.now().isoformat(),
                     }
                     guardrail_results.append(guardrail_check)
                     
                     # If guardrail fails, return early
-                    if not guardrail_check["passed"]:
+                    if not passed:
                         return {
                             "messages": [{
                                 "content": "Sorry, I can only answer questions related to conference topics.",
@@ -150,13 +171,10 @@ async def run_single_agent_turn(
         # Get agent instructions
         instructions = agent.instructions(context, agent) if callable(agent.instructions) else agent.instructions
         
-        # Simple agent execution - in a real implementation, you'd use the full agents framework
-        # For now, we'll simulate the agent behavior
-        
         # Check if this is a handoff request
         handoff_keywords = {
-            "schedule": ["schedule", "session", "speaker", "event", "time", "date", "july", "room", "track"],
-            "networking": ["attendee", "people", "business", "company", "network", "connect", "find"]
+            "schedule": ["schedule", "session", "speaker", "event", "time", "date", "july", "room", "track", "when", "what time"],
+            "networking": ["attendee", "people", "business", "company", "network", "connect", "find", "who", "attendees", "businesses"]
         }
         
         message_lower = message.lower()
@@ -193,18 +211,74 @@ async def run_single_agent_turn(
                         })
         
         elif agent.name == "Networking Agent" and agent.tools:
-            # Use the networking tools
-            for tool in agent.tools:
-                if tool.__name__ == "search_attendees_tool":
-                    try:
-                        result = await tool(context, query=message)
-                        tool_results.append({
-                            "tool_name": tool.__name__,
-                            "result": result
-                        })
-                        break
-                    except Exception as e:
-                        logger.error(f"Error executing tool {tool.__name__}: {e}")
+            # Check if user wants to add business
+            if any(phrase in message_lower for phrase in ["add business", "register business", "add my business", "register my company"]):
+                # Use display business form tool
+                for tool in agent.tools:
+                    if tool.__name__ == "display_business_form_tool":
+                        try:
+                            result = await tool(context)
+                            tool_results.append({
+                                "tool_name": tool.__name__,
+                                "result": result
+                            })
+                            break
+                        except Exception as e:
+                            logger.error(f"Error executing tool {tool.__name__}: {e}")
+            
+            # Check if this is business data submission
+            elif "company name:" in message_lower and "industry sector:" in message_lower:
+                # Parse business data and use add_business tool
+                try:
+                    lines = message.split('\n')
+                    business_data = {}
+                    for line in lines:
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            key = key.strip().lower().replace(' ', '_')
+                            value = value.strip()
+                            business_data[key] = value
+                    
+                    # Use add_business tool
+                    for tool in agent.tools:
+                        if tool.__name__ == "add_business_tool":
+                            try:
+                                result = await tool(
+                                    context,
+                                    company_name=business_data.get('company_name', ''),
+                                    industry_sector=business_data.get('industry_sector', ''),
+                                    sub_sector=business_data.get('sub-sector', ''),
+                                    location=business_data.get('location', ''),
+                                    position_title=business_data.get('position_title', ''),
+                                    legal_structure=business_data.get('legal_structure', ''),
+                                    establishment_year=business_data.get('establishment_year', ''),
+                                    products_or_services=business_data.get('products/services', ''),
+                                    brief_description=business_data.get('brief_description', ''),
+                                    website=business_data.get('website')
+                                )
+                                tool_results.append({
+                                    "tool_name": tool.__name__,
+                                    "result": result
+                                })
+                                break
+                            except Exception as e:
+                                logger.error(f"Error executing tool {tool.__name__}: {e}")
+                except Exception as e:
+                    logger.error(f"Error parsing business data: {e}")
+            
+            else:
+                # Use the networking search tools
+                for tool in agent.tools:
+                    if tool.__name__ == "search_attendees_tool":
+                        try:
+                            result = await tool(context, query=message)
+                            tool_results.append({
+                                "tool_name": tool.__name__,
+                                "result": result
+                            })
+                            break
+                        except Exception as e:
+                            logger.error(f"Error executing tool {tool.__name__}: {e}")
         
         # Generate response
         if target_agent:

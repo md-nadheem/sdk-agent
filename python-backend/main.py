@@ -165,18 +165,22 @@ def triage_instructions(
         "If users ask unrelated questions, politely redirect them to conference topics."
     )
 
+# Create the triage agent first
 triage_agent = Agent[AirlineAgentContext](
     name="Triage Agent",
     model="groq/llama3-8b-8192",
     handoff_description="Main entry point for conference assistance",
     instructions=triage_instructions,
     tools=[get_user_info_tool],
-    handoffs=[
-        handoff(schedule_agent, on_schedule_handoff),
-        handoff(networking_agent, on_networking_handoff),
-    ],
+    handoffs=[],  # Will be set after creating other agents
     input_guardrails=["relevance_guardrail", "jailbreak_guardrail"],
 )
+
+# Now set up handoffs after all agents are created
+triage_agent.handoffs = [
+    handoff(schedule_agent, on_schedule_handoff),
+    handoff(networking_agent, on_networking_handoff),
+]
 
 # Update handoffs for other agents to include triage
 schedule_agent.handoffs = [handoff(triage_agent)]
