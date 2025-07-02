@@ -385,12 +385,12 @@
 
 
 
-
 import os
 from supabase import create_client, Client
 from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime, date
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -465,6 +465,13 @@ class SupabaseClient:
         """Get user details by QR code (which is the main user ID)."""
         try:
             logger.debug(f"Querying users table for QR code (ID): '{qr_code}'")
+            
+            # Validate UUID format first
+            try:
+                uuid.UUID(qr_code)
+            except ValueError:
+                logger.error(f"Invalid UUID format for QR code: {qr_code}")
+                return None
             
             # Query users table by ID (assuming QR code contains the user ID)
             response = self.supabase.table("users").select("*").eq("id", qr_code).execute()
