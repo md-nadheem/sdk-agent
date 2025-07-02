@@ -13,7 +13,6 @@ from agents import (
     RunContextWrapper,
     function_tool,
     handoff,
-    run_agents,
 )
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 from shared_types import AirlineAgentContext, RelevanceOutput, JailbreakOutput
@@ -184,39 +183,31 @@ schedule_agent.handoffs = [handoff(triage_agent)]
 networking_agent.handoffs = [handoff(triage_agent)]
 
 # =========================
-# MAIN RUNNER
+# EXPORTED COMPONENTS
+# =========================
+
+# Export all agents for use in api.py
+all_agents = [triage_agent, schedule_agent, networking_agent]
+
+# Export all guardrails for use in api.py
+all_guardrails = {
+    "relevance_guardrail": relevance_guardrail,
+    "jailbreak_guardrail": jailbreak_guardrail,
+}
+
+# Export the starting agent
+starting_agent = triage_agent
+
+# =========================
+# MAIN RUNNER (for standalone testing)
 # =========================
 
 async def main():
-    """Main function to run the conference assistant."""
-    
-    # Initialize context
-    context = AirlineAgentContext()
-    
-    # Define all agents
-    agents = [triage_agent, schedule_agent, networking_agent]
-    
-    # Define guardrails
-    guardrails = {
-        "relevance_guardrail": relevance_guardrail,
-        "jailbreak_guardrail": jailbreak_guardrail,
-    }
-    
+    """Main function to run the conference assistant standalone."""
     print("🎉 Conference Assistant Started!")
-    print("Available commands:")
-    print("- Ask about conference schedule, sessions, speakers")
-    print("- Find attendees and business connections")
-    print("- Get information about events and networking")
-    print("- Type 'quit' to exit")
+    print("This is a standalone test mode.")
+    print("For full functionality, use the web interface.")
     print("-" * 50)
-    
-    # Run the agent system
-    await run_agents(
-        agents=agents,
-        context=context,
-        guardrails=guardrails,
-        starting_agent=triage_agent.name,
-    )
 
 if __name__ == "__main__":
     asyncio.run(main())
